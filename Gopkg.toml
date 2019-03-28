@@ -88,7 +88,7 @@
 
 [[override]]
   version = "v1.3.1"
-  name = "gopkg.in/fsnotify.v1"
+  name = "github.com/fsnotify/fsnotify"
 
 [[constraint]]
   branch = "master"

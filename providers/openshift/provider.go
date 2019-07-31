@@ -17,6 +17,9 @@ import (
 	"time"
 
 	"github.com/bitly/go-simplejson"
+
+	oscrypto "github.com/openshift/library-go/pkg/crypto"
+
 	"github.com/openshift/oauth-proxy/providers"
 	"github.com/openshift/oauth-proxy/util"
 
@@ -136,10 +139,8 @@ func (p *OpenShiftProvider) newOpenShiftClient() (*http.Client, error) {
 	return &http.Client{
 		Jar: http.DefaultClient.Jar,
 		Transport: &http.Transport{
-			Proxy: http.ProxyFromEnvironment,
-			TLSClientConfig: &tls.Config{
-				RootCAs: pool,
-			},
+			Proxy:           http.ProxyFromEnvironment,
+			TLSClientConfig: oscrypto.SecureTLSConfig(&tls.Config{RootCAs: pool}),
 		},
 	}, nil
 }

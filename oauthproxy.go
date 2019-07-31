@@ -18,10 +18,13 @@ import (
 	"golang.org/x/net/http2"
 
 	"github.com/18F/hmacauth"
+	"github.com/yhat/wsutil"
+
+	oscrypto "github.com/openshift/library-go/pkg/crypto"
+
 	"github.com/openshift/oauth-proxy/cookie"
 	"github.com/openshift/oauth-proxy/providers"
 	"github.com/openshift/oauth-proxy/util"
-	"github.com/yhat/wsutil"
 )
 
 const SignatureHeader = "GAP-Signature"
@@ -116,9 +119,7 @@ func NewReverseProxy(target *url.URL, upstreamFlush time.Duration, rootCAs []str
 		if err != nil {
 			return nil, err
 		}
-		transport.TLSClientConfig = &tls.Config{
-			RootCAs: pool,
-		}
+		transport.TLSClientConfig = oscrypto.SecureTLSConfig(&tls.Config{RootCAs: pool})
 	}
 	if err := http2.ConfigureTransport(transport); err != nil {
 		if len(rootCAs) > 0 {
@@ -178,9 +179,7 @@ func NewWebSocketOrRestReverseProxy(u *url.URL, opts *Options, auth hmacauth.Hma
 			if err != nil {
 				log.Fatal("Failed to fetch CertPool: ", err)
 			}
-			wsProxy.TLSClientConfig = &tls.Config{
-				RootCAs: pool,
-			}
+			wsProxy.TLSClientConfig = oscrypto.SecureTLSConfig(&tls.Config{RootCAs: pool})
 		}
 
 	}

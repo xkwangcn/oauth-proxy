@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	oscrypto "github.com/openshift/library-go/pkg/crypto"
+
 	"github.com/openshift/oauth-proxy/util"
 )
 
@@ -66,10 +68,8 @@ func (s *Server) ServeHTTP() {
 
 func (s *Server) ServeHTTPS() {
 	addr := s.Opts.HttpsAddress
-	config := &tls.Config{
-		MinVersion: tls.VersionTLS12,
-		MaxVersion: tls.VersionTLS12,
-	}
+
+	config := oscrypto.SecureTLSConfig(&tls.Config{})
 	if config.NextProtos == nil {
 		config.NextProtos = []string{"http/1.1"}
 	}

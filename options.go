@@ -13,6 +13,9 @@ import (
 	"time"
 
 	"github.com/18F/hmacauth"
+
+	oscrypto "github.com/openshift/library-go/pkg/crypto"
+
 	"github.com/openshift/oauth-proxy/providers"
 	"github.com/openshift/oauth-proxy/providers/openshift"
 )
@@ -290,7 +293,7 @@ func (o *Options) Validate(p providers.Provider) error {
 
 	if o.SSLInsecureSkipVerify {
 		insecureTransport := &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			TLSClientConfig: oscrypto.SecureTLSConfig(&tls.Config{InsecureSkipVerify: true}), // eh
 		}
 		http.DefaultClient = &http.Client{Transport: insecureTransport}
 	}

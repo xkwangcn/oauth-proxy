@@ -2,11 +2,15 @@ package e2e
 
 import (
 	"bytes"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io/ioutil"
 	mathrand "math/rand"
 	"net/http"
+	"net/http/cookiejar"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -400,6 +404,8 @@ func TestOAuthProxyE2E(t *testing.T) {
 
 			waitForHealthzCheck([][]byte{caPem, openshiftPemCA}, "https://"+proxyRouteHost)
 
+			check3DESDisabled(t, [][]byte{caPem, openshiftPemCA}, "https://"+proxyRouteHost)
+
 			err = confirmOAuthFlow(proxyRouteHost, tc.accessSubPath, [][]byte{caPem, openshiftPemCA}, user, tc.pageResult, tc.expectedErr, tc.bypass)
 
 			if err == nil && len(tc.expectedErr) > 0 {
@@ -508,4 +514,38 @@ func confirmOAuthFlow(host, subPath string, cas [][]byte, user, expectedPageResu
 	}
 
 	return nil
+}
+
+func check3DESDisabled(t *testing.T, cas [][]byte, url string) {
+	pool := x509.NewCertPool()
+	for _, ca := range cas {
+		if !pool.AppendCertsFromPEM(ca) {
+			t.Fatal("error loading CA for client config")
+		}
+	}
+
+	jar, _ := cookiejar.New(nil)
+	tr := &http.Transport{
+		MaxIdleConns:    10,
+		IdleConnTimeout: 30 * time.Second,
+		TLSClientConfig: &tls.Config{
+			RootCAs: pool,
+			CipherSuites: []uint16{
+				tls.TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA,
+				tls.TLS_RSA_WITH_3DES_EDE_CBC_SHA,
+			},
+		},
+	}
+
+	client := &http.Client{Transport: tr, Jar: jar}
+	resp, err := getResponse(url, client)
+
+	if err == nil {
+		resp.Body.Close()
+		t.Fatal("expected to fail with weak ciphers")
+	}
+
+	if !strings.Contains(err.Error(), "handshake failure") {
+		t.Fatalf("expected TLS handshake error with weak ciphers, got: %v", err)
+	}
 }

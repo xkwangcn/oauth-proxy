@@ -771,7 +771,7 @@ func (p *OAuthProxy) Authenticate(rw http.ResponseWriter, req *http.Request) int
 	if session == nil {
 		session, err = p.CheckBasicAuth(req)
 		if err != nil {
-			log.Printf("%s %s", remoteAddr, err)
+			log.Printf("basicauth: %s %s", remoteAddr, err)
 		}
 	}
 
@@ -779,7 +779,7 @@ func (p *OAuthProxy) Authenticate(rw http.ResponseWriter, req *http.Request) int
 	if session == nil {
 		session, err = p.CheckRequestAuth(req)
 		if err != nil {
-			log.Printf("%s %s", remoteAddr, err)
+			log.Printf("requestauth: %s %s", remoteAddr, err)
 		}
 		tokenProvidedByClient = true
 	}
@@ -829,7 +829,7 @@ func (p *OAuthProxy) CheckBasicAuth(req *http.Request) (*providers.SessionState,
 	}
 	s := strings.SplitN(auth, " ", 2)
 	if len(s) != 2 || s[0] != "Basic" {
-		return nil, fmt.Errorf("invalid Authorization header %s", req.Header.Get("Authorization"))
+		return nil, fmt.Errorf("Authorization header does not start with 'Basic', skipping basic authentication")
 	}
 	b, err := b64.StdEncoding.DecodeString(s[1])
 	if err != nil {

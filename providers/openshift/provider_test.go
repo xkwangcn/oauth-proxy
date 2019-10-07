@@ -1,11 +1,14 @@
 package openshift
 
 import (
-	"k8s.io/apiserver/pkg/authentication/user"
-	"k8s.io/apiserver/pkg/authorization/authorizer"
+	"io/ioutil"
 	"net/http"
+	"os"
 	"reflect"
 	"testing"
+
+	"k8s.io/apiserver/pkg/authentication/user"
+	"k8s.io/apiserver/pkg/authorization/authorizer"
 )
 
 type mockAuthRequestHandler struct {
@@ -13,6 +16,42 @@ type mockAuthRequestHandler struct {
 
 type mockAuthorizer struct {
 }
+
+// if you're seeing cert expiration errors on 'Nov  3 11:57:34 2119 GMT', I am sorry
+const longLivedCACert = `
+-----BEGIN CERTIFICATE-----
+MIIFjjCCA3agAwIBAgIUYICrP1shKbhgEbQsmHdf64W7hGwwDQYJKoZIhvcNAQEN
+BQAwTzELMAkGA1UEBhMCQ1oxEDAOBgNVBAgMB01vcmF2aWExHDAaBgNVBAoME015
+IFByaXZhdGUgT3JnIEx0ZC4xEDAOBgNVBAMMB1Rlc3QgQ0EwIBcNMTkxMDA4MTE1
+NzMzWhgPMjExOTExMDMxMTU3MzNaME8xCzAJBgNVBAYTAkNaMRAwDgYDVQQIDAdN
+b3JhdmlhMRwwGgYDVQQKDBNNeSBQcml2YXRlIE9yZyBMdGQuMRAwDgYDVQQDDAdU
+ZXN0IENBMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAqGrcAHxo2Iiu
+jNABMdasP0lHRiV3m6DGmDFGEWI9A5s4hSL+2Nh9Hnu1bmCqmm88EB8wQBxgte08
+hhxtamFHhqTvsr2zvZIinPI+ntgHuKWH2fKVNmHUA0/DfA51yPppRZXws2J2OhwG
+VBfmztV6StSWP5HuCbujGnuMG37+CEiOqqR8nfvwtXhebEYCEGcRJmPQLWZuhohh
+7Ie/M6auSQS29Xnezy/6To1V7kMuBwKq+ywTftfNiWRTRRAtx5+cd5EeZf8svO5z
+WSYWQK+OzyjqCTwYDmm5WhHid112jsjhNMHVM8mL9za4E7zgZBYBRSkKiM5UVWTs
+Lb6kO3FkIlQzqt9eSYzZfcQxUfuSOKviubtNghGI2TmoElcbgIIZ0zVBxa5k4DMY
+Hr36B+PggXPbzF+pxAMpmR0qYKth6mGW6SJZTXdjwEbFSRE+zrpcttCGJgQsseTl
+hV2BCyVq8aDvmMKh63sGAkalK1TmqNRplFuohSFW523Ilm2I93EF0/L4pRQ7+KZ3
+8+tFvrv1XswX0wWMNnsrUVIkvmsX2olZgvlN/taqovgTvC0zcO7EopDDveXMMLRY
+C3wPP222sJ5wOGpT+m8HmddNaVWuW/9MzOgAEr4kuFlQUcvGdP/Z3IUgp8cVrjM7
+g6wVyVvguWE0a2q8xLw6Y3CKp5bLHh8CAwEAAaNgMF4wHQYDVR0OBBYEFNb1bu9A
+OeRUWyN15uG/aIBtIgyTMB8GA1UdIwQYMBaAFNb1bu9AOeRUWyN15uG/aIBtIgyT
+MA8GA1UdEwEB/wQFMAMBAf8wCwYDVR0PBAQDAgEGMA0GCSqGSIb3DQEBDQUAA4IC
+AQACR2hSEMqlkFZ7RX/csZgpMt4E5z0TJZ7Uny+yKV/ibIFcy7sfU2bXnZX63Sdl
+do89DkVTqI4T48byvF8KQ+pHr4ow5nvA2rigmQEySrSBT9GseZm9XIFy/Sb4vUml
+dXYcmeJYNVgGAOspwrFg8mJ8a+afkBArSJyNLIemv+P2Bb4fChUhpoVt3XngJJJZ
+5SxvF9g++0ZaDEse80wHCaHlgeh48Yo0SczNHv5lJ5uQzNIjxBEad/4P02Uj7wXf
+J8TX3NK15P+Iwvf+UY8odtjIsLMd2KltaJ7P4MqTAS+b7Xb9i0CZgEtnCG3Fup8b
+xM5S9S55qLUNUQtolNs2jxSnMGOciG3G/sdcl/qbiQZchvKvYZp8Q8NnavBIcRkQ
+mZ0P2BPrg6rfofaNvOpTz+NeaWDFfQzC7+2QnfiiIOL8le7b4lOjmLyCfZaNW8WN
+PlYMGYA460xdn/IWPJcLCdt3rNw+CKZCw4pxZvUWqzRnCrNkM4zA7JgLn7M9Vx1l
+3q4sUFMZuUjWIxACwk9u/U4sc2rLYelwHhg/2j0hUoqbDhyHRYUVruptwRSebE2U
+KvcuxUCTIws0kHzgUX6qT6gDFKDl9A+EgIcusosjUNIjLUsgUPs6THNvQadMEEV7
+w9aR8p+EwE+/BERIzwURZmyINWafvMjVGNHCKC1w7AhFEA==
+-----END CERTIFICATE-----
+`
 
 func TestParseSubjectAccessReviews(t *testing.T) {
 
@@ -91,5 +130,51 @@ func TestDontPassBasicAuthentication(t *testing.T) {
 	}
 	if g, e := session.AccessToken, ""; g != e {
 		t.Errorf("access token should be empty string for basic authentication: %v", session)
+	}
+}
+
+func TestNewOpenShiftClient(t *testing.T) {
+	tmpfile, err := ioutil.TempFile("", "osclienttest-")
+	if err != nil {
+		t.Fatalf("failed to create tempfile: %v", err)
+	}
+	defer os.Remove(tmpfile.Name())
+
+	_, err = tmpfile.WriteString(longLivedCACert)
+	if err != nil {
+		t.Fatalf("failed to write CA cert to tmpfile: %v", err)
+	}
+
+	p := &OpenShiftProvider{}
+	p.paths = recordsByPath{pathRecord{"/someurl", authorizer.AttributesRecord{}}}
+	p.authenticator = &mockAuthRequestHandler{}
+	p.authorizer = &mockAuthorizer{}
+	p.SetReviewCAs([]string{tmpfile.Name()})
+
+	client, err := p.newOpenShiftClient()
+	if err != nil {
+		t.Fatalf("failed to create an OpenShift Client")
+	}
+
+	newClient, err := p.newOpenShiftClient()
+	if err != nil {
+		t.Fatalf("failed to create a new OpenShift Client")
+	}
+
+	// caching should make sure the clients are the same
+	if client != newClient {
+		t.Errorf("repeated call of newOpenShiftClient() returned different client pointers")
+	}
+
+	// useless change but should change the metadata enough to get us a new client
+	tmpfile.WriteString("\n")
+
+	newClient, err = p.newOpenShiftClient()
+	if err != nil {
+		t.Fatalf("failed to create a new OpenShift Client")
+	}
+
+	if client == newClient {
+		t.Errorf("repeated call of newOpenShiftClient() after one of the CA changed returned the same client pointer")
 	}
 }

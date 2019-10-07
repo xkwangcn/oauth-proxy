@@ -47,7 +47,7 @@ func GetFilesMetadataHash(paths []string) (string, error) {
 	for _, path := range paths {
 		meta, err := os.Stat(path)
 		if err != nil {
-			return "", fmt.Errorf("couldn't stat '%s': %v", path, err)
+			return "", fmt.Errorf("couldn't stat %q: %v", path, err)
 		}
 
 		hashData = append(hashData, meta.Name()+strconv.FormatInt(meta.Size(), 10)+meta.ModTime().String())

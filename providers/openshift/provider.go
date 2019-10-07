@@ -14,6 +14,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bitly/go-simplejson"
@@ -48,6 +49,13 @@ type OpenShiftProvider struct {
 	reviews       []string
 	paths         recordsByPath
 	hostreviews   map[string][]string
+
+	// httpClientCache stores httpClient objects so that new client does not have to
+	// be created on each request just to prevent CAs content changed
+	// key is bytes of the hashed metadata of the files for CAs the client was
+	// created with
+	// NOTE: the entries of the map are currently not being cleaned up
+	httpClientCache sync.Map
 }
 
 func (p *OpenShiftProvider) GetReviewCAs() []string {
@@ -131,18 +139,29 @@ func (p *OpenShiftProvider) newOpenShiftClient() (*http.Client, error) {
 		capaths = paths
 		system_roots = false
 	}
+
+	// try to retrieve a cached client
+	metadataHash, err := util.GetFilesMetadataHash(capaths)
+	if httpClient, ok := p.httpClientCache.Load(metadataHash); ok {
+		return httpClient.(*http.Client), nil
+	}
+
+	// client not in cache, create new
 	pool, err := util.GetCertPool(capaths, system_roots)
 	if err != nil {
 		return nil, err
 	}
 
-	return &http.Client{
+	httpClient := &http.Client{
 		Jar: http.DefaultClient.Jar,
 		Transport: &http.Transport{
 			Proxy:           http.ProxyFromEnvironment,
 			TLSClientConfig: oscrypto.SecureTLSConfig(&tls.Config{RootCAs: pool}),
 		},
-	}, nil
+	}
+	p.httpClientCache.Store(metadataHash, httpClient)
+
+	return httpClient, nil
 }
 
 // encodeSARWithScope adds a "scopes" array to the SAR if it does not have one already, and outputs

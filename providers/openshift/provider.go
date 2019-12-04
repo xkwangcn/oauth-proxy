@@ -30,13 +30,6 @@ import (
 	authorizationv1beta1 "k8s.io/client-go/pkg/apis/authorization/v1beta1"
 )
 
-// httpClientCache stores httpClient objects so that new client does not have to
-// be created on each request just to prevent CAs content changed
-// key is bytes of the hashed metadata of the files for CAs the client was
-// created with
-// NOTE: the entries of the map are currently not being cleaned up
-var httpClientCache sync.Map
-
 func emptyURL(u *url.URL) bool {
 	return u == nil || u.String() == ""
 }
@@ -56,6 +49,13 @@ type OpenShiftProvider struct {
 	reviews       []string
 	paths         recordsByPath
 	hostreviews   map[string][]string
+
+	// httpClientCache stores httpClient objects so that new client does not have to
+	// be created on each request just to prevent CAs content changed
+	// key is bytes of the hashed metadata of the files for CAs the client was
+	// created with
+	// NOTE: the entries of the map are currently not being cleaned up
+	httpClientCache sync.Map
 }
 
 func (p *OpenShiftProvider) GetReviewCAs() []string {
@@ -142,7 +142,7 @@ func (p *OpenShiftProvider) newOpenShiftClient() (*http.Client, error) {
 
 	// try to retrieve a cached client
 	metadataHash, err := util.GetFilesMetadataHash(capaths)
-	if httpClient, ok := httpClientCache.Load(metadataHash); ok {
+	if httpClient, ok := p.httpClientCache.Load(metadataHash); ok {
 		return httpClient.(*http.Client), nil
 	}
 
@@ -159,7 +159,7 @@ func (p *OpenShiftProvider) newOpenShiftClient() (*http.Client, error) {
 			TLSClientConfig: oscrypto.SecureTLSConfig(&tls.Config{RootCAs: pool}),
 		},
 	}
-	httpClientCache.Store(metadataHash, httpClient)
+	p.httpClientCache.Store(metadataHash, httpClient)
 
 	return httpClient, nil
 }

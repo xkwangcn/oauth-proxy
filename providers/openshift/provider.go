@@ -14,9 +14,13 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bitly/go-simplejson"
+
+	oscrypto "github.com/openshift/library-go/pkg/crypto"
+
 	"github.com/openshift/oauth-proxy/providers"
 	"github.com/openshift/oauth-proxy/util"
 
@@ -34,7 +38,7 @@ type OpenShiftProvider struct {
 	*providers.ProviderData
 
 	ReviewURL *url.URL
-	Client    *http.Client
+	ReviewCAs []string
 
 	AuthenticationOptions DelegatingAuthenticationOptions
 	AuthorizationOptions  DelegatingAuthorizationOptions
@@ -45,6 +49,21 @@ type OpenShiftProvider struct {
 	reviews       []string
 	paths         recordsByPath
 	hostreviews   map[string][]string
+
+	// httpClientCache stores httpClient objects so that new client does not have to
+	// be created on each request just to prevent CAs content changed
+	// key is bytes of the hashed metadata of the files for CAs the client was
+	// created with
+	// NOTE: the entries of the map are currently not being cleaned up
+	httpClientCache sync.Map
+}
+
+func (p *OpenShiftProvider) GetReviewCAs() []string {
+	return p.ReviewCAs
+}
+
+func (p *OpenShiftProvider) SetReviewCAs(cas []string) {
+	p.ReviewCAs = cas
 }
 
 func New() *OpenShiftProvider {
@@ -67,7 +86,7 @@ func (p *OpenShiftProvider) Bind(flags *flag.FlagSet) {
 
 // LoadDefaults accepts configuration and loads defaults from the environment, or returns an error.
 // The provider may partially initialize config for subsequent calls.
-func (p *OpenShiftProvider) LoadDefaults(serviceAccount string, caPaths []string, reviewJSON, reviewByHostJSON, resources string) (*providers.ProviderData, error) {
+func (p *OpenShiftProvider) LoadDefaults(serviceAccount string, reviewJSON, reviewByHostJSON, resources string) (*providers.ProviderData, error) {
 	if len(resources) > 0 {
 		paths, err := parseResources(resources)
 		if err != nil {
@@ -87,10 +106,6 @@ func (p *OpenShiftProvider) LoadDefaults(serviceAccount string, caPaths []string
 	}
 	p.hostreviews = hostreviews
 
-	if err := p.setCAandTransportProxy(caPaths); err != nil {
-		return nil, err
-	}
-
 	defaults := &providers.ProviderData{
 		Scope: "user:info user:check-access",
 	}
@@ -108,25 +123,15 @@ func (p *OpenShiftProvider) LoadDefaults(serviceAccount string, caPaths []string
 		}
 	}
 
-	// attempt to discover endpoints
-	if err := discoverOpenShiftOAuth(defaults, p.Client); err != nil {
-		log.Printf("Unable to discover default cluster OAuth info: %v", err)
-		return defaults, nil
-	}
 	// provide default URLs
 	defaults.ValidateURL = getKubeAPIURLWithPath("/apis/user.openshift.io/v1/users/~")
 
 	return defaults, nil
 }
 
-// SetCA initializes the client used for connecting to the master.
-func (p *OpenShiftProvider) setCAandTransportProxy(paths []string) error {
-	if p.Client == nil {
-		p.Client = &http.Client{
-			Jar:       http.DefaultClient.Jar,
-			Transport: http.DefaultTransport,
-		}
-	}
+// newOpenShiftClient returns a client for connecting to the master.
+func (p *OpenShiftProvider) newOpenShiftClient() (*http.Client, error) {
+	paths := p.GetReviewCAs()
 	//defaults
 	capaths := []string{"/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"}
 	system_roots := true
@@ -134,17 +139,29 @@ func (p *OpenShiftProvider) setCAandTransportProxy(paths []string) error {
 		capaths = paths
 		system_roots = false
 	}
+
+	// try to retrieve a cached client
+	metadataHash, err := util.GetFilesMetadataHash(capaths)
+	if httpClient, ok := p.httpClientCache.Load(metadataHash); ok {
+		return httpClient.(*http.Client), nil
+	}
+
+	// client not in cache, create new
 	pool, err := util.GetCertPool(capaths, system_roots)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	p.Client.Transport = &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		TLSClientConfig: &tls.Config{
-			RootCAs: pool,
+
+	httpClient := &http.Client{
+		Jar: http.DefaultClient.Jar,
+		Transport: &http.Transport{
+			Proxy:           http.ProxyFromEnvironment,
+			TLSClientConfig: oscrypto.SecureTLSConfig(&tls.Config{RootCAs: pool}),
 		},
 	}
-	return nil
+	p.httpClientCache.Store(metadataHash, httpClient)
+
+	return httpClient, nil
 }
 
 // encodeSARWithScope adds a "scopes" array to the SAR if it does not have one already, and outputs
@@ -390,8 +407,14 @@ func (p *OpenShiftProvider) GetEmailAddress(s *providers.SessionState) (string, 
 		log.Printf("failed building request %s", err)
 		return "", fmt.Errorf("unable to build request to get user email info: %v", err)
 	}
+
+	client, err := p.newOpenShiftClient()
+	if err != nil {
+		return "", err
+	}
+
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", s.AccessToken))
-	json, err := request(p.Client, req)
+	json, err := request(client, req)
 	if err != nil {
 		return "", fmt.Errorf("unable to retrieve email address for user from token: %v", err)
 	}
@@ -416,6 +439,11 @@ func (p *OpenShiftProvider) ReviewUser(name, accessToken, host string) error {
 		tocheck = append(tocheck, p.reviews...)
 	}
 
+	client, err := p.newOpenShiftClient()
+	if err != nil {
+		return err
+	}
+
 	for _, review := range tocheck {
 		req, err := http.NewRequest("POST", p.ReviewURL.String(), bytes.NewBufferString(review))
 		if err != nil {
@@ -424,7 +452,7 @@ func (p *OpenShiftProvider) ReviewUser(name, accessToken, host string) error {
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", accessToken))
-		json, err := request(p.Client, req)
+		json, err := request(client, req)
 		if err != nil {
 			return err
 		}
@@ -446,9 +474,11 @@ func (p *OpenShiftProvider) Redeem(redeemURL *url.URL, redirectURL, code string)
 		err = errors.New("missing code")
 		return
 	}
-	client := p.Client
-	if client == nil {
-		client = http.DefaultClient
+
+	client, caErr := p.newOpenShiftClient()
+	if caErr != nil {
+		err = caErr
+		return
 	}
 
 	params := url.Values{}
@@ -510,67 +540,62 @@ func (p *OpenShiftProvider) Redeem(redeemURL *url.URL, redirectURL, code string)
 	return
 }
 
-func (p *OpenShiftProvider) GetLoginURL() *url.URL {
+func (p *OpenShiftProvider) GetLoginURL() (*url.URL, error) {
 	if !emptyURL(p.ConfigLoginURL) {
-		return p.ConfigLoginURL
+		return p.ConfigLoginURL, nil
+	}
+	client, err := p.newOpenShiftClient()
+	if err != nil {
+		return nil, err
 	}
 
-	if emptyURL(p.LoginURL) {
-		// clear the endpoints so that we get all the newly discovered endpoints for all
-		p.ClearEndpointsCache()
-		discoverOpenShiftOAuth(p.ProviderData, p.Client)
-	}
-	return p.LoginURL
+	loginURL, _, err := discoverOpenShiftOAuth(client)
+	return loginURL, err
 }
 
-func (p *OpenShiftProvider) GetRedeemURL() *url.URL {
+func (p *OpenShiftProvider) GetRedeemURL() (*url.URL, error) {
 	if !emptyURL(p.ConfigRedeemURL) {
-		return p.ConfigRedeemURL
+		return p.ConfigRedeemURL, nil
+	}
+	client, err := p.newOpenShiftClient()
+	if err != nil {
+		return nil, err
 	}
 
-	if emptyURL(p.RedeemURL) {
-		// clear the endpoints so that we get all the newly discovered endpoints
-		p.ClearEndpointsCache()
-		discoverOpenShiftOAuth(p.ProviderData, p.Client)
-	}
-	return p.RedeemURL
+	_, redeemURL, err := discoverOpenShiftOAuth(client)
+	return redeemURL, err
 }
 
-// discoverOpenshiftOAuth sets the LoginURL and RedeemURL of the supplied ProviderData if they are unset or empty
-func discoverOpenShiftOAuth(provider *providers.ProviderData, client *http.Client) error {
+// discoverOpenshiftOAuth returns the urls of the login and code redeem endpoitns
+// it receives from the /.well-known/oauth-authorization-server endpoint
+func discoverOpenShiftOAuth(client *http.Client) (*url.URL, *url.URL, error) {
 	wellKnownAuthorization := getKubeAPIURLWithPath("/.well-known/oauth-authorization-server")
 	log.Printf("Performing OAuth discovery against %s", wellKnownAuthorization)
 	req, err := http.NewRequest("GET", wellKnownAuthorization.String(), nil)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	json, err := request(client, req)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	if emptyURL(provider.LoginURL) {
-		if value, err := json.Get("authorization_endpoint").String(); err == nil && len(value) > 0 {
-			if u, err := url.Parse(value); err == nil {
-				provider.LoginURL = u
-			} else {
-				log.Printf("Unable to parse 'authorization_endpoint' from %s: %v", wellKnownAuthorization, err)
-			}
-		} else {
-			log.Printf("No 'authorization_endpoint' provided by %s: %v", wellKnownAuthorization, err)
+
+	var loginURL, redeemURL *url.URL
+	if value, err := json.Get("authorization_endpoint").String(); err == nil && len(value) > 0 {
+		if loginURL, err = url.Parse(value); err != nil {
+			return nil, nil, fmt.Errorf("Unable to parse 'authorization_endpoint' from %s: %v", wellKnownAuthorization, err)
 		}
+	} else {
+		return nil, nil, fmt.Errorf("No 'authorization_endpoint' provided by %s: %v", wellKnownAuthorization, err)
 	}
-	if emptyURL(provider.RedeemURL) {
-		if value, err := json.Get("token_endpoint").String(); err == nil && len(value) > 0 {
-			if u, err := url.Parse(value); err == nil {
-				provider.RedeemURL = u
-			} else {
-				log.Printf("Unable to parse 'token_endpoint' from %s: %v", wellKnownAuthorization, err)
-			}
-		} else {
-			log.Printf("No 'token_endpoint' provided by %s: %v", wellKnownAuthorization, err)
+	if value, err := json.Get("token_endpoint").String(); err == nil && len(value) > 0 {
+		if redeemURL, err = url.Parse(value); err != nil {
+			return nil, nil, fmt.Errorf("Unable to parse 'token_endpoint' from %s: %v", wellKnownAuthorization, err)
 		}
+	} else {
+		return nil, nil, fmt.Errorf("No 'token_endpoint' provided by %s: %v", wellKnownAuthorization, err)
 	}
-	return nil
+	return loginURL, redeemURL, nil
 }
 
 // Copied to override http.Client so that CA can be set

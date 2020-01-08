@@ -13,6 +13,9 @@ import (
 	"time"
 
 	"github.com/18F/hmacauth"
+
+	oscrypto "github.com/openshift/library-go/pkg/crypto"
+
 	"github.com/openshift/oauth-proxy/providers"
 	"github.com/openshift/oauth-proxy/providers/openshift"
 )
@@ -140,7 +143,7 @@ func (o *Options) Validate(p providers.Provider) error {
 	// allow the provider to default some values
 	switch provider := p.(type) {
 	case *openshift.OpenShiftProvider:
-		defaults, err := provider.LoadDefaults(o.OpenShiftServiceAccount, o.OpenShiftCAs, o.OpenShiftSAR, o.OpenShiftSARByHost, o.OpenShiftDelegateURLs)
+		defaults, err := provider.LoadDefaults(o.OpenShiftServiceAccount, o.OpenShiftSAR, o.OpenShiftSARByHost, o.OpenShiftDelegateURLs)
 		if err != nil {
 			return err
 		}
@@ -204,6 +207,7 @@ func (o *Options) Validate(p providers.Provider) error {
 			msgs = append(msgs, fmt.Sprintf(
 				"error parsing upstream=%q %s",
 				upstreamURL, err))
+			continue
 		}
 		if upstreamURL.Path == "" {
 			upstreamURL.Path = "/"
@@ -289,7 +293,7 @@ func (o *Options) Validate(p providers.Provider) error {
 
 	if o.SSLInsecureSkipVerify {
 		insecureTransport := &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			TLSClientConfig: oscrypto.SecureTLSConfig(&tls.Config{InsecureSkipVerify: true}), // eh
 		}
 		http.DefaultClient = &http.Client{Transport: insecureTransport}
 	}
@@ -336,8 +340,8 @@ func (o *Options) validateProvider(provider providers.Provider) []string {
 		p.ClientID = data.ClientID
 		p.ClientSecret = data.ClientSecret
 		p.ApprovalPrompt = data.ApprovalPrompt
-		p.LoginURL = data.LoginURL
-		p.RedeemURL = data.RedeemURL
+		p.ConfigLoginURL = data.ConfigLoginURL
+		p.ConfigRedeemURL = data.ConfigRedeemURL
 		p.ProfileURL = data.ProfileURL
 		p.ValidateURL = data.ValidateURL
 	}

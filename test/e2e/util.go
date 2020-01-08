@@ -31,6 +31,8 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
+
+	oscrypto "github.com/openshift/library-go/pkg/crypto"
 )
 
 const (
@@ -218,9 +220,7 @@ func newHTTPSClient(cas [][]byte) (*http.Client, error) {
 	tr := &http.Transport{
 		MaxIdleConns:    10,
 		IdleConnTimeout: 30 * time.Second,
-		TLSClientConfig: &tls.Config{
-			RootCAs: pool,
-		},
+		TLSClientConfig: oscrypto.SecureTLSConfig(&tls.Config{RootCAs: pool}),
 	}
 
 	client := &http.Client{Transport: tr, Jar: jar}
@@ -246,8 +246,8 @@ func createCAandCertSet(host string) ([]byte, []byte, []byte, error) {
 		NotAfter:              notAfter,
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment | x509.KeyUsageCertSign,
 		BasicConstraintsValid: true,
-		IsCA:       true,
-		MaxPathLen: 10,
+		IsCA:                  true,
+		MaxPathLen:            10,
 	}
 
 	caCert, caKey, err := createParsedCertificate(caTemplate, caTemplate, nil)
@@ -265,8 +265,8 @@ func createCAandCertSet(host string) ([]byte, []byte, []byte, error) {
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
-		IsCA:     false,
-		DNSNames: []string{host},
+		IsCA:                  false,
+		DNSNames:              []string{host},
 	}
 
 	serverCert, serverKey, err := createParsedCertificate(serverTemplate, caCert, caKey)

@@ -20,8 +20,9 @@ if [ "${1}" == "clusterup" ]; then
 		if [ ! -d "${ORIGIN_BUILD_DIR}/src" ]; then
 			mkdir -p ${ORIGIN_BUILD_DIR}/src
 		fi
-		GOPATH=${ORIGIN_BUILD_DIR} go get github.com/openshift/origin
 		pushd .
+		cd /
+		GOPATH=${ORIGIN_BUILD_DIR} go get github.com/openshift/origin
 		cd ${ORIGIN_PATH}
 		# Stabilize on a known working 3.9 commit just for assurance.
 		git checkout 126033b

@@ -2,7 +2,7 @@ GOFLAGS :=
 IMAGE_REPOSITORY_NAME ?= openshift
 
 build:
-	go build $(GOFLAGS) .
+	go build -mod=vendor $(GOFLAGS) .
 .PHONY: build
 
 images:

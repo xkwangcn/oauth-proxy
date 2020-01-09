@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"k8s.io/apiserver/pkg/authentication/authenticatorfactory"
-	authenticationclient "k8s.io/client-go/kubernetes/typed/authentication/v1beta1"
+	"k8s.io/apiserver/pkg/authentication/request/headerrequest"
+	"k8s.io/apiserver/pkg/server/dynamiccertificates"
+	authenticationclient "k8s.io/client-go/kubernetes/typed/authentication/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
@@ -55,18 +57,23 @@ func (s *RequestHeaderAuthenticationOptions) AddFlags(fs *flag.FlagSet) {
 
 // ToAuthenticationRequestHeaderConfig returns a RequestHeaderConfig config object for these options
 // if necessary, nil otherwise.
-func (s *RequestHeaderAuthenticationOptions) ToAuthenticationRequestHeaderConfig() *authenticatorfactory.RequestHeaderConfig {
+func (s *RequestHeaderAuthenticationOptions) ToAuthenticationRequestHeaderConfig() (*authenticatorfactory.RequestHeaderConfig, error) {
 	if len(s.ClientCAFile) == 0 {
-		return nil
+		return nil, nil
+	}
+
+	dynamicCAProvider, err := dynamiccertificates.NewDynamicCAContentFromFile("request-header", s.ClientCAFile)
+	if err != nil {
+		return nil, err
 	}
 
 	return &authenticatorfactory.RequestHeaderConfig{
-		UsernameHeaders:     s.UsernameHeaders,
-		GroupHeaders:        s.GroupHeaders,
-		ExtraHeaderPrefixes: s.ExtraHeaderPrefixes,
-		ClientCA:            s.ClientCAFile,
-		AllowedClientNames:  s.AllowedNames,
-	}
+		UsernameHeaders:     headerrequest.StaticStringSlice(s.UsernameHeaders),
+		GroupHeaders:        headerrequest.StaticStringSlice(s.GroupHeaders),
+		ExtraHeaderPrefixes: headerrequest.StaticStringSlice(s.ExtraHeaderPrefixes),
+		CAContentProvider:   dynamicCAProvider,
+		AllowedClientNames:  headerrequest.StaticStringSlice(s.AllowedNames),
+	}, nil
 }
 
 type ClientCertAuthenticationOptions struct {
@@ -135,12 +142,25 @@ func (s *DelegatingAuthenticationOptions) ToAuthenticationConfig() (authenticato
 		return authenticatorfactory.DelegatingAuthenticatorConfig{}, err
 	}
 
+	requestHeaderConfig, err := requestHeader.ToAuthenticationRequestHeaderConfig()
+	if err != nil {
+		return authenticatorfactory.DelegatingAuthenticatorConfig{}, err
+	}
+
+	var clientCAProvider *dynamiccertificates.DynamicFileCAContent
+	if len(clientCA.ClientCA) > 0 {
+		clientCAProvider, err = dynamiccertificates.NewDynamicCAContentFromFile("client-ca-bundle", clientCA.ClientCA)
+		if err != nil {
+			return authenticatorfactory.DelegatingAuthenticatorConfig{}, err
+		}
+	}
+
 	ret := authenticatorfactory.DelegatingAuthenticatorConfig{
-		Anonymous:               true,
-		TokenAccessReviewClient: tokenClient,
-		CacheTTL:                s.CacheTTL,
-		ClientCAFile:            clientCA.ClientCA,
-		RequestHeaderConfig:     requestHeader.ToAuthenticationRequestHeaderConfig(),
+		Anonymous:                          true,
+		TokenAccessReviewClient:            tokenClient,
+		CacheTTL:                           s.CacheTTL,
+		ClientCertificateCAContentProvider: clientCAProvider,
+		RequestHeaderConfig:                requestHeaderConfig,
 	}
 	return ret, nil
 }

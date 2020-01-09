@@ -1,12 +1,14 @@
 package openshift
 
 import (
+	"context"
 	"io/ioutil"
 	"net/http"
 	"os"
 	"reflect"
 	"testing"
 
+	"k8s.io/apiserver/pkg/authentication/authenticator"
 	"k8s.io/apiserver/pkg/authentication/user"
 	"k8s.io/apiserver/pkg/authorization/authorizer"
 )
@@ -85,12 +87,12 @@ func TestParseSubjectAccessReviews(t *testing.T) {
 	}
 }
 
-func (mock *mockAuthRequestHandler) AuthenticateRequest(req *http.Request) (user.Info, bool, error) {
-	return &user.DefaultInfo{Name: "username", UID: "uid"}, true, nil
+func (mock *mockAuthRequestHandler) AuthenticateRequest(req *http.Request) (*authenticator.Response, bool, error) {
+	return &authenticator.Response{User: &user.DefaultInfo{Name: "username", UID: "uid"}}, true, nil
 }
 
-func (mock *mockAuthorizer) Authorize(record authorizer.Attributes) (bool, string, error) {
-	return true, "", nil
+func (mock *mockAuthorizer) Authorize(ctx context.Context, record authorizer.Attributes) (authorizer.Decision, string, error) {
+	return authorizer.DecisionAllow, "", nil
 }
 
 func TestPassOAuthToken(t *testing.T) {

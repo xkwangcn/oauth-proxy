@@ -23,10 +23,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/golang/glog"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/validation"
+	"k8s.io/klog"
 )
 
 // Requirements is AND of all requirements.
@@ -51,6 +51,14 @@ type Selector interface {
 	// If there are querying parameters, it will return converted requirements and selectable=true.
 	// If this selector doesn't want to select anything, it will return selectable=false.
 	Requirements() (requirements Requirements, selectable bool)
+
+	// Make a deep copy of the selector.
+	DeepCopySelector() Selector
+
+	// RequiresExactMatch allows a caller to introspect whether a given selector
+	// requires a single specific label to be set, and if so returns the value it
+	// requires.
+	RequiresExactMatch(label string) (value string, found bool)
 }
 
 // Everything returns a selector that matches all labels.
@@ -60,11 +68,13 @@ func Everything() Selector {
 
 type nothingSelector struct{}
 
-func (n nothingSelector) Matches(_ Labels) bool              { return false }
-func (n nothingSelector) Empty() bool                        { return false }
-func (n nothingSelector) String() string                     { return "" }
-func (n nothingSelector) Add(_ ...Requirement) Selector      { return n }
-func (n nothingSelector) Requirements() (Requirements, bool) { return nil, false }
+func (n nothingSelector) Matches(_ Labels) bool                                      { return false }
+func (n nothingSelector) Empty() bool                                                { return false }
+func (n nothingSelector) String() string                                             { return "" }
+func (n nothingSelector) Add(_ ...Requirement) Selector                              { return n }
+func (n nothingSelector) Requirements() (Requirements, bool)                         { return nil, false }
+func (n nothingSelector) DeepCopySelector() Selector                                 { return n }
+func (n nothingSelector) RequiresExactMatch(label string) (value string, found bool) { return "", false }
 
 // Nothing returns a selector that matches no labels
 func Nothing() Selector {
@@ -77,6 +87,21 @@ func NewSelector() Selector {
 }
 
 type internalSelector []Requirement
+
+func (s internalSelector) DeepCopy() internalSelector {
+	if s == nil {
+		return nil
+	}
+	result := make([]Requirement, len(s))
+	for i := range s {
+		s[i].DeepCopyInto(&result[i])
+	}
+	return result
+}
+
+func (s internalSelector) DeepCopySelector() Selector {
+	return s.DeepCopy()
+}
 
 // ByKey sorts requirements by key to obtain deterministic parser
 type ByKey []Requirement
@@ -91,6 +116,7 @@ func (a ByKey) Less(i, j int) bool { return a[i].key < a[j].key }
 // The zero value of Requirement is invalid.
 // Requirement implements both set based match and exact match
 // Requirement should be initialized via NewRequirement constructor for creating a valid Requirement.
+// +k8s:deepcopy-gen=true
 type Requirement struct {
 	key      string
 	operator selection.Operator
@@ -142,11 +168,10 @@ func NewRequirement(key string, op selection.Operator, vals []string) (*Requirem
 	}
 
 	for i := range vals {
-		if err := validateLabelValue(vals[i]); err != nil {
+		if err := validateLabelValue(key, vals[i]); err != nil {
 			return nil, err
 		}
 	}
-	sort.Strings(vals)
 	return &Requirement{key: key, operator: op, strValues: vals}, nil
 }
 
@@ -192,13 +217,13 @@ func (r *Requirement) Matches(ls Labels) bool {
 		}
 		lsValue, err := strconv.ParseInt(ls.Get(r.key), 10, 64)
 		if err != nil {
-			glog.V(10).Infof("ParseInt failed for value %+v in label %+v, %+v", ls.Get(r.key), ls, err)
+			klog.V(10).Infof("ParseInt failed for value %+v in label %+v, %+v", ls.Get(r.key), ls, err)
 			return false
 		}
 
 		// There should be only one strValue in r.strValues, and can be converted to a integer.
 		if len(r.strValues) != 1 {
-			glog.V(10).Infof("Invalid values count %+v of requirement %#v, for 'Gt', 'Lt' operators, exactly one value is required", len(r.strValues), r)
+			klog.V(10).Infof("Invalid values count %+v of requirement %#v, for 'Gt', 'Lt' operators, exactly one value is required", len(r.strValues), r)
 			return false
 		}
 
@@ -206,7 +231,7 @@ func (r *Requirement) Matches(ls Labels) bool {
 		for i := range r.strValues {
 			rValue, err = strconv.ParseInt(r.strValues[i], 10, 64)
 			if err != nil {
-				glog.V(10).Infof("ParseInt failed for value %+v in requirement %#v, for 'Gt', 'Lt' operators, the value must be an integer", r.strValues[i], r)
+				klog.V(10).Infof("ParseInt failed for value %+v in requirement %#v, for 'Gt', 'Lt' operators, the value must be an integer", r.strValues[i], r)
 				return false
 			}
 		}
@@ -279,7 +304,9 @@ func (r *Requirement) String() string {
 	if len(r.strValues) == 1 {
 		buffer.WriteString(r.strValues[0])
 	} else { // only > 1 since == 0 prohibited by NewRequirement
-		buffer.WriteString(strings.Join(r.strValues, ","))
+		// normalizes value order on output, without mutating the in-memory selector representation
+		// also avoids normalization when it is not required, and ensures we do not mutate shared data
+		buffer.WriteString(strings.Join(safeSort(r.strValues), ","))
 	}
 
 	switch r.operator {
@@ -287,6 +314,17 @@ func (r *Requirement) String() string {
 		buffer.WriteString(")")
 	}
 	return buffer.String()
+}
+
+// safeSort sort input strings without modification
+func safeSort(in []string) []string {
+	if sort.StringsAreSorted(in) {
+		return in
+	}
+	out := make([]string, len(in))
+	copy(out, in)
+	sort.Strings(out)
+	return out
 }
 
 // Add adds requirements to the selector. It copies the current selector returning a new one
@@ -324,6 +362,23 @@ func (lsel internalSelector) String() string {
 		reqs = append(reqs, lsel[ix].String())
 	}
 	return strings.Join(reqs, ",")
+}
+
+// RequiresExactMatch introspect whether a given selector requires a single specific field
+// to be set, and if so returns the value it requires.
+func (lsel internalSelector) RequiresExactMatch(label string) (value string, found bool) {
+	for ix := range lsel {
+		if lsel[ix].key == label {
+			switch lsel[ix].operator {
+			case selection.Equals, selection.DoubleEquals, selection.In:
+				if len(lsel[ix].strValues) == 1 {
+					return lsel[ix].strValues[0], true
+				}
+			}
+			return "", false
+		}
+	}
+	return "", false
 }
 
 // Token represents constant definition for lexer token
@@ -530,7 +585,7 @@ func (p *Parser) lookahead(context ParserContext) (Token, string) {
 	return tok, lit
 }
 
-// consume returns current token and string. Increments the the position
+// consume returns current token and string. Increments the position
 func (p *Parser) consume(context ParserContext) (Token, string) {
 	p.position++
 	tok, lit := p.scannedItems[p.position-1].tok, p.scannedItems[p.position-1].literal
@@ -805,9 +860,9 @@ func validateLabelKey(k string) error {
 	return nil
 }
 
-func validateLabelValue(v string) error {
+func validateLabelValue(k, v string) error {
 	if errs := validation.IsValidLabelValue(v); len(errs) != 0 {
-		return fmt.Errorf("invalid label value: %q: %s", v, strings.Join(errs, "; "))
+		return fmt.Errorf("invalid label value: %q: at key: %q: %s", v, k, strings.Join(errs, "; "))
 	}
 	return nil
 }
@@ -818,7 +873,7 @@ func SelectorFromSet(ls Set) Selector {
 	if ls == nil || len(ls) == 0 {
 		return internalSelector{}
 	}
-	var requirements internalSelector
+	requirements := make([]Requirement, 0, len(ls))
 	for label, value := range ls {
 		r, err := NewRequirement(label, selection.Equals, []string{value})
 		if err == nil {
@@ -830,7 +885,7 @@ func SelectorFromSet(ls Set) Selector {
 	}
 	// sort to have deterministic string representation
 	sort.Sort(ByKey(requirements))
-	return requirements
+	return internalSelector(requirements)
 }
 
 // SelectorFromValidatedSet returns a Selector which will match exactly the given Set.
@@ -840,13 +895,13 @@ func SelectorFromValidatedSet(ls Set) Selector {
 	if ls == nil || len(ls) == 0 {
 		return internalSelector{}
 	}
-	var requirements internalSelector
+	requirements := make([]Requirement, 0, len(ls))
 	for label, value := range ls {
 		requirements = append(requirements, Requirement{key: label, operator: selection.Equals, strValues: []string{value}})
 	}
 	// sort to have deterministic string representation
 	sort.Sort(ByKey(requirements))
-	return requirements
+	return internalSelector(requirements)
 }
 
 // ParseToRequirements takes a string representing a selector and returns a list of

@@ -2,6 +2,7 @@ package openshift
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -24,10 +25,10 @@ import (
 	"github.com/openshift/oauth-proxy/providers"
 	"github.com/openshift/oauth-proxy/util"
 
+	authenticationv1 "k8s.io/api/authentication/v1"
+	authorizationv1 "k8s.io/api/authorization/v1"
 	"k8s.io/apiserver/pkg/authentication/authenticator"
 	"k8s.io/apiserver/pkg/authorization/authorizer"
-	authenticationv1beta1 "k8s.io/client-go/pkg/apis/authentication/v1beta1"
-	authorizationv1beta1 "k8s.io/client-go/pkg/apis/authorization/v1beta1"
 )
 
 func emptyURL(u *url.URL) bool {
@@ -261,7 +262,7 @@ func parseResources(resources string) (recordsByPath, error) {
 		ResourceRequest: true,
 	}
 	var paths recordsByPath
-	mappings := make(map[string]authorizationv1beta1.ResourceAttributes)
+	mappings := make(map[string]authorizationv1.ResourceAttributes)
 	if err := json.Unmarshal([]byte(resources), &mappings); err != nil {
 		return nil, fmt.Errorf("resources must be a JSON map of paths to authorizationv1beta1.ResourceAttributes: %v", err)
 	}
@@ -315,8 +316,8 @@ func (p *OpenShiftProvider) Complete(data *providers.ProviderData, reviewURL *ur
 		}
 		// check whether we have access to perform authentication review
 		if authenticator.TokenAccessReviewClient != nil {
-			_, err := authenticator.TokenAccessReviewClient.Create(&authenticationv1beta1.TokenReview{
-				Spec: authenticationv1beta1.TokenReviewSpec{
+			_, err := authenticator.TokenAccessReviewClient.Create(&authenticationv1.TokenReview{
+				Spec: authenticationv1.TokenReviewSpec{
 					Token: "TEST",
 				},
 			})
@@ -331,10 +332,10 @@ func (p *OpenShiftProvider) Complete(data *providers.ProviderData, reviewURL *ur
 		}
 		// check whether we have access to perform authentication review
 		if authorizer.SubjectAccessReviewClient != nil {
-			_, err := authorizer.SubjectAccessReviewClient.Create(&authorizationv1beta1.SubjectAccessReview{
-				Spec: authorizationv1beta1.SubjectAccessReviewSpec{
+			_, err := authorizer.SubjectAccessReviewClient.Create(&authorizationv1.SubjectAccessReview{
+				Spec: authorizationv1.SubjectAccessReviewSpec{
 					User: "TEST",
-					ResourceAttributes: &authorizationv1beta1.ResourceAttributes{
+					ResourceAttributes: &authorizationv1.ResourceAttributes{
 						Resource: "TEST",
 						Verb:     "TEST",
 					},
@@ -374,7 +375,7 @@ func (p *OpenShiftProvider) ValidateRequest(req *http.Request) (*providers.Sessi
 	auth := req.Header.Get("Authorization")
 
 	// authenticate
-	user, ok, err := p.authenticator.AuthenticateRequest(req)
+	response, ok, err := p.authenticator.AuthenticateRequest(req)
 	if err != nil {
 		return nil, err
 	}
@@ -383,18 +384,18 @@ func (p *OpenShiftProvider) ValidateRequest(req *http.Request) (*providers.Sessi
 	}
 
 	// authorize
-	record.record.User = user
-	ok, reason, err := p.authorizer.Authorize(record.record)
+	record.record.User = response.User
+	decision, reason, err := p.authorizer.Authorize(context.Background(), record.record)
 	if err != nil {
 		return nil, err
 	}
-	if !ok {
+	if decision != authorizer.DecisionAllow {
 		log.Printf("authorizer reason: %s", reason)
 		return nil, nil
 	}
 
 	parts := strings.SplitN(auth, " ", 2)
-	session := &providers.SessionState{User: user.GetName(), Email: user.GetName() + "@cluster.local"}
+	session := &providers.SessionState{User: response.User.GetName(), Email: response.User.GetName() + "@cluster.local"}
 	if parts[0] == "Bearer" {
 		session.AccessToken = parts[1]
 	}

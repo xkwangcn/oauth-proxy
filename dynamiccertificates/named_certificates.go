@@ -23,8 +23,8 @@ import (
 	"net"
 	"strings"
 
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
+	v1 "k8s.io/client-go/pkg/api/v1"
 	"k8s.io/klog"
 )
 
@@ -52,7 +52,7 @@ func (c *DynamicServingCertificateController) BuildNamedCertificates(sniCerts []
 
 		klog.V(2).Infof("loaded SNI cert [%d/%q]: %s", i, c.sniCerts[i].Name(), GetHumanCertDetail(x509Cert))
 		if c.eventRecorder != nil {
-			c.eventRecorder.Eventf(nil, nil, v1.EventTypeWarning, "TLSConfigChanged", "SNICertificateReload", "loaded SNI cert [%d/%q]: %s with explicit names %v", i, c.sniCerts[i].Name(), GetHumanCertDetail(x509Cert), names)
+			c.eventRecorder.Eventf(nil, v1.EventTypeWarning, "TLSConfigChanged", "SNICertificateReload", "loaded SNI cert [%d/%q]: %s with explicit names %v", i, c.sniCerts[i].Name(), GetHumanCertDetail(x509Cert), names)
 		}
 
 		if len(names) == 0 {

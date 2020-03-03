@@ -170,7 +170,7 @@ func (c *DynamicFileCAContent) Run(workers int, stopCh <-chan struct{}) {
 	go wait.Until(c.runWorker, time.Second, stopCh)
 
 	// start timer that rechecks every minute, just in case.  this also serves to prime the controller quickly.
-	go wait.PollImmediateUntil(FileRefreshDuration, func() (bool, error) {
+	go pollImmediateUntil(FileRefreshDuration, func() (bool, error) {
 		c.queue.Add(workItemKey)
 		return false, nil
 	}, stopCh)
@@ -234,7 +234,7 @@ func newCABundleAndVerifier(name string, caBundle []byte) (*caBundleAndVerifier,
 	// Wrap with an x509 verifier
 	var err error
 	verifyOptions := defaultVerifyOptions()
-	verifyOptions.Roots, err = cert.NewPoolFromBytes(caBundle)
+	verifyOptions.Roots, err = newPoolFromBytes(caBundle)
 	if err != nil {
 		return nil, fmt.Errorf("error loading CA bundle for %q: %v", name, err)
 	}
@@ -251,4 +251,20 @@ func defaultVerifyOptions() x509.VerifyOptions {
 	return x509.VerifyOptions{
 		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 	}
+}
+
+// newPoolFromBytes returns an x509.CertPool containing the certificates in the given PEM-encoded bytes.
+// Returns an error if the file could not be read, a certificate could not be parsed, or if the file does not contain any certificates
+//
+// This was forked from kube 1.17's k8s.io/client-go/util/cert
+func newPoolFromBytes(pemBlock []byte) (*x509.CertPool, error) {
+	certs, err := cert.ParseCertsPEM(pemBlock)
+	if err != nil {
+		return nil, err
+	}
+	pool := x509.NewCertPool()
+	for _, cert := range certs {
+		pool.AddCert(cert)
+	}
+	return pool, nil
 }

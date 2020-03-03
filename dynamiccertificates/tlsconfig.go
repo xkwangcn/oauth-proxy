@@ -25,11 +25,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	v1 "k8s.io/api/core/v1"
+	v1 "k8s.io/client-go/pkg/api/v1"
 
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/tools/events"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/cert"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog"
@@ -58,7 +58,7 @@ type DynamicServingCertificateController struct {
 
 	// queue only ever has one item, but it has nice error handling backoff/retry semantics
 	queue         workqueue.RateLimitingInterface
-	eventRecorder events.EventRecorder
+	eventRecorder record.EventRecorder
 }
 
 var _ Listener = &DynamicServingCertificateController{}
@@ -69,7 +69,7 @@ func NewDynamicServingCertificateController(
 	clientCA CAContentProvider,
 	servingCert CertKeyContentProvider,
 	sniCerts []SNICertKeyContentProvider,
-	eventRecorder events.EventRecorder,
+	eventRecorder record.EventRecorder,
 ) *DynamicServingCertificateController {
 	c := &DynamicServingCertificateController{
 		baseTLSConfig: baseTLSConfig,
@@ -178,7 +178,7 @@ func (c *DynamicServingCertificateController) syncCerts() error {
 		for i, cert := range newClientCAs {
 			klog.V(2).Infof("loaded client CA [%d/%q]: %s", i, c.clientCA.Name(), GetHumanCertDetail(cert))
 			if c.eventRecorder != nil {
-				c.eventRecorder.Eventf(nil, nil, v1.EventTypeWarning, "TLSConfigChanged", "CACertificateReload", "loaded client CA [%d/%q]: %s", i, c.clientCA.Name(), GetHumanCertDetail(cert))
+				c.eventRecorder.Eventf(nil, v1.EventTypeWarning, "TLSConfigChanged", "CACertificateReload", "loaded client CA [%d/%q]: %s", i, c.clientCA.Name(), GetHumanCertDetail(cert))
 			}
 
 			newClientCAPool.AddCert(cert)
@@ -200,7 +200,7 @@ func (c *DynamicServingCertificateController) syncCerts() error {
 
 		klog.V(2).Infof("loaded serving cert [%q]: %s", c.servingCert.Name(), GetHumanCertDetail(x509Cert))
 		if c.eventRecorder != nil {
-			c.eventRecorder.Eventf(nil, nil, v1.EventTypeWarning, "TLSConfigChanged", "ServingCertificateReload", "loaded serving cert [%q]: %s", c.clientCA.Name(), GetHumanCertDetail(x509Cert))
+			c.eventRecorder.Eventf(nil, v1.EventTypeWarning, "TLSConfigChanged", "ServingCertificateReload", "loaded serving cert [%q]: %s", c.clientCA.Name(), GetHumanCertDetail(x509Cert))
 		}
 
 		newTLSConfigCopy.Certificates = []tls.Certificate{cert}

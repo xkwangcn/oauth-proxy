@@ -196,6 +196,14 @@
 
 [[projects]]
   branch = "master"
+  digest = "1:4f6eeb36bf5878cc13757c318e4a57a35dbfd85a55257e891b31991b8c46a381"
+  name = "github.com/golang/groupcache"
+  packages = ["lru"]
+  pruneopts = ""
+  revision = "8c9f03a8e57eb486e42badaed3fb287da51807ba"
+
+[[projects]]
+  branch = "master"
   digest = "1:754f77e9c839b24778a4b64422236d38515301d2baeb63113aa3edc42e6af692"
   name = "github.com/google/gofuzz"
   packages = ["."]
@@ -429,16 +437,19 @@
     "pkg/util/framer",
     "pkg/util/intstr",
     "pkg/util/json",
+    "pkg/util/mergepatch",
     "pkg/util/net",
     "pkg/util/rand",
     "pkg/util/runtime",
     "pkg/util/sets",
+    "pkg/util/strategicpatch",
     "pkg/util/validation",
     "pkg/util/validation/field",
     "pkg/util/wait",
     "pkg/util/yaml",
     "pkg/version",
     "pkg/watch",
+    "third_party/forked/golang/json",
     "third_party/forked/golang/reflect",
   ]
   pruneopts = ""
@@ -542,11 +553,13 @@
     "tools/clientcmd/api/latest",
     "tools/clientcmd/api/v1",
     "tools/metrics",
+    "tools/record",
     "transport",
     "util/cert",
     "util/flowcontrol",
     "util/homedir",
     "util/integer",
+    "util/workqueue",
   ]
   pruneopts = ""
   revision = "36b51953e6efc7779fe27c14258d78573de4e0de"
@@ -577,6 +590,8 @@
     "k8s.io/apimachinery/pkg/api/errors",
     "k8s.io/apimachinery/pkg/apis/meta/v1",
     "k8s.io/apimachinery/pkg/util/intstr",
+    "k8s.io/apimachinery/pkg/util/runtime",
+    "k8s.io/apimachinery/pkg/util/validation",
     "k8s.io/apimachinery/pkg/util/wait",
     "k8s.io/apiserver/pkg/authentication/authenticator",
     "k8s.io/apiserver/pkg/authentication/authenticatorfactory",
@@ -592,6 +607,10 @@
     "k8s.io/client-go/rest",
     "k8s.io/client-go/tools/clientcmd",
     "k8s.io/client-go/tools/clientcmd/api",
+    "k8s.io/client-go/tools/record",
+    "k8s.io/client-go/util/cert",
+    "k8s.io/client-go/util/workqueue",
+    "k8s.io/klog",
   ]
   solver-name = "gps-cdcl"
   solver-version = 1

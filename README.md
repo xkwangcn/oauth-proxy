@@ -232,6 +232,7 @@ Usage of oauth-proxy:
   -cookie-name string: the name of the cookie that the oauth_proxy creates (default "_oauth2_proxy")
   -cookie-refresh duration: refresh the cookie after this duration; 0 to disable
   -cookie-secret string: the seed string for secure cookies (optionally base64 encoded)
+  -cookie-secret-file string: same as "-cookie-secret" but read it from a file
   -cookie-secure: set secure (HTTPS) cookie flag (default true)
   -custom-templates-dir string: path to custom html templates
   -display-htpasswd-form: display username / password login form if an htpasswd file is provided (default true)

@@ -2,17 +2,16 @@
 set -e
 
 PROJECT_REPO=github.com/openshift/oauth-proxy
-DOCKER_REPO=docker.io/xk96
-KUBECONFIG=~/.kube/config
+DOCKER_REPO=quay.io/xk96
+KUBECONFIG=/root/.kube/config
 TEST_NAMESPACE=wxk-project
 
-REV=$(git rev-parse --short HEAD)
-TEST_IMAGE=${DOCKER_REPO}/oauth-proxy-${REV}:latest
-#TEST_IMAGE=docker.io/xk96/oauth-proxy:4.3.0-0.nightly-s390x-2020-03-09-183623
+REV=e2e_test_s390
+#REV=$(git rev-parse --short HEAD)
+TEST_IMAGE="quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:23341e8550cc066abf1651efadd219264cfb6a39eca2bc8e42dd5bde696a3294"
 TEST_DIR=$(pwd)/test
 HELLO_PATH=${TEST_DIR}/e2e/hello
-#HELLO_IAMGE=docker.io/xk96/hello-openshift:s390x
-HELLO_IMAGE=${DOCKER_REPO}/hello-proxy-${REV}:latest
+HELLO_IAMGE="docker.io/xk96/hello-openshift:s390x"
 ORIGIN_BUILD_DIR=/tmp/opbuild
 ORIGIN_PATH=${ORIGIN_BUILD_DIR}/src/github.com/openshift/origin
 
@@ -47,14 +46,14 @@ if [ "${1}" == "clusterup" ]; then
 fi
 
 # build backend site
-go build -o ${HELLO_PATH}/hello_openshift ${PROJECT_REPO}/test/e2e/hello
-sudo docker build -t ${HELLO_IMAGE} ${HELLO_PATH}
-sudo docker push ${HELLO_IMAGE}
+#go build -o ${HELLO_PATH}/hello_openshift ${PROJECT_REPO}/test/e2e/hello
+#sudo docker build -t ${HELLO_IMAGE} ${HELLO_PATH}
+#sudo docker push ${HELLO_IMAGE}
 
 # build oauth-proxy
-go build -o ${TEST_DIR}/oauth-proxy
-sudo docker build -t ${TEST_IMAGE} ${TEST_DIR}/
-sudo docker push ${TEST_IMAGE}
+#go build -o ${TEST_DIR}/oauth-proxy
+#sudo docker build -t ${TEST_IMAGE} ${TEST_DIR}/
+#sudo docker push ${TEST_IMAGE}
 
 # run test
 export TEST_IMAGE TEST_NAMESPACE HELLO_IMAGE KUBECONFIG

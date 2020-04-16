@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"io/ioutil"
+	"log"
 	mathrand "math/rand"
 	"net/http"
 	"net/http/cookiejar"
@@ -439,6 +440,21 @@ func submitOAuthForm(client *http.Client, response *http.Response, user, expecte
 	}
 
 	forms := getElementsByTagName(body, "form")
+	log.Printf("e2e test: the form num %d", len(forms))
+	log.Printf("e2e test: the response request url host %s path %s", response.Request.URL.Host, response.Request.URL.Path)
+	//checkBuffer := bytes.NewBuffer(responseBytes)
+	//parsed, err := html.Parse(checkBuffer)
+	//if err != nil {
+	//return nil, err
+	//}
+	//textNodes := getTextNodes(parsed)
+	//for i := range textNodes {
+	//log.Printf("e2e test: the textNodes content %s", textNodes[i].Data)
+	//}
+
+	for i := range forms {
+		log.Printf("e2e test: the form content %s", forms[i].Data)
+	}
 	if len(forms) != 1 {
 		errMsg := "expected OpenShift form"
 		// Return the expected error if it's found amongst the text elements
@@ -480,34 +496,86 @@ func confirmOAuthFlow(host, subPath string, cas [][]byte, user, expectedPageResu
 	}
 
 	startUrl := "https://" + host + subPath
+	log.Printf("e2e test: starturl %s", startUrl)
+
 	resp, err := getResponse(startUrl, client)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
+	log.Printf("e2e test: response status %s response proto %s", resp.Status, resp.Proto)
 
 	if !expectedBypass {
 		// OpenShift login
+		respBody, err0 := ioutil.ReadAll(resp.Body)
+		if err0 != nil {
+			return err
+		}
+		log.Printf("e2e test: resp body : %s", respBody)
 		loginResp, err := submitOAuthForm(client, resp, user, expectedErr)
+		loginRespBody, err1 := ioutil.ReadAll(loginResp.Body)
+		if err1 != nil {
+			return err
+		}
+		checkBuffer := bytes.NewBuffer(loginRespBody)
+		parsed, err := html.Parse(checkBuffer)
+		if err != nil {
+			return err
+		}
+		textNodes := getTextNodes(parsed)
+		for i := range textNodes {
+			//log.Printf("new accessRespBody is %s, expectedPageResult is %s, expectedErr is %s", textNodes[i].Data, expectedPageResult, expectedErr)
+			if string(textNodes[i].Data) == expectedPageResult {
+				return nil
+			}
+			if string(textNodes[i].Data) == expectedErr {
+				return fmt.Errorf(expectedErr)
+			}
+		}
+		log.Printf("e2e test: login resp body : %s", loginRespBody)
 		if err != nil {
 			return err
 		}
 		defer loginResp.Body.Close()
 
+		// approve grant form
+		approveResp := loginResp
+		if loginResp.Request.URL.Path == "/oauth/authorize/approve" {
+			log.Printf("will go to approve form")
+			approveResp, err = submitOAuthForm(client, loginResp, user, expectedErr)
+		}
+		if err != nil {
+			return err
+		}
+		approveRespBody, err2 := ioutil.ReadAll(approveResp.Body)
+		if err2 != nil {
+			return err
+		}
+		log.Printf("e2e test: approve resp body : %s", approveRespBody)
+		defer approveResp.Body.Close()
+
 		// authorization grant form
-		grantResp, err := submitOAuthForm(client, loginResp, user, expectedErr)
+		grantResp, err := submitOAuthForm(client, approveResp, user, expectedErr)
+		grantRespBody, err3 := ioutil.ReadAll(grantResp.Body)
+		if err3 != nil {
+			return err
+		}
+		log.Printf("e2e test: grant resp body : %s", grantRespBody)
 		if err != nil {
 			return err
 		}
 
 		defer grantResp.Body.Close()
+
 		resp = grantResp
 	}
 
 	accessRespBody, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return nil
+		return err
 	}
+
+	log.Printf("accessRespBody is %s, expectedPageResult is %s", accessRespBody, expectedPageResult)
 
 	if string(accessRespBody) != expectedPageResult {
 		return fmt.Errorf("did not reach upstream site")

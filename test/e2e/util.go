@@ -1,6 +1,7 @@
 package e2e
 
 import (
+        "log"
 	"bufio"
 	"bytes"
 	"crypto/rand"
@@ -333,6 +334,7 @@ func randLogin() string {
 	for i := range b {
 		b[i] = letters[mathrand.Intn(len(letters))]
 	}
+   //     return "adminuser1"
 	return "developer" + string(b)
 }
 
@@ -374,11 +376,11 @@ func newRequestFromForm(form *html.Node, currentURL *url.URL, user string) (*htt
 				switch inputType {
 				case "text":
 					if name == "username" {
-						formData.Add(name, user)
+						formData.Add(name, "adminuser1")
 					}
 				case "password":
 					if name == "password" {
-						formData.Add(name, "foo")
+						formData.Add(name, "triplet-farmhand")
 					}
 				case "submit":
 					// If this is a submit input, only add the value of the first one.
@@ -407,7 +409,7 @@ func newRequestFromForm(form *html.Node, currentURL *url.URL, user string) (*htt
 	default:
 		return nil, fmt.Errorf("unknown method: %s", reqMethod)
 	}
-
+        log.Printf("e2e test: form reqURL %s, reqBody %s", reqURL.String(), reqBody)
 	req, err := http.NewRequest(reqMethod, reqURL.String(), reqBody)
 	if err != nil {
 		return nil, err
@@ -567,8 +569,8 @@ func newOAuthProxyPod(proxyImage, backendImage string, proxyArgs, backendEnvs []
 			ServiceAccountName: "proxy",
 			Containers: []corev1.Container{
 				{
-					Image:           proxyImage,
-					ImagePullPolicy: corev1.PullIfNotPresent,
+					Image:           "quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:23341e8550cc066abf1651efadd219264cfb6a39eca2bc8e42dd5bde696a3294",
+					ImagePullPolicy: corev1.PullAlways,
 					Name:            "oauth-proxy",
 					Args:            proxyArgs,
 					Ports: []corev1.ContainerPort{
@@ -584,7 +586,7 @@ func newOAuthProxyPod(proxyImage, backendImage string, proxyArgs, backendEnvs []
 					},
 				},
 				{
-					Image: backendImage,
+					Image: "docker.io/xk96/hello-openshift:s390x",
 					Name:  "hello-openshift",
 					Ports: []corev1.ContainerPort{
 						{
